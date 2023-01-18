@@ -9,8 +9,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,27 +20,31 @@ import (
 const (
 	APP_NAME = "ann-downloader"
 	VERSION  = "0.9.0"
-
-	YEARS = 3
 )
 
+// Downloader first get all stocks info,
+// then download selected symbols and year
+// announcements under dir/<stock>.<name>
 type Downloader struct {
+	// Dir prefix to download
 	Dir string
 
-	Year []int
+	// Years to lookup, e.g 20xx
+	Year []string
 
 	// TODO
-	SkipExists bool
+	SkipIfExists bool
 
 	list struct {
 		StockList []map[string]string
 	}
 }
 
-type Code struct {
-	Code  string
+type code struct {
+	Stock string
 	OrgId string
-	Name  string
+	// Name removed '*', e.g *ST
+	Name string
 }
 
 func main() {
@@ -89,10 +95,14 @@ func main() {
 
 	dl := Downloader{
 		Dir:  defDir,
-		Year: []int{defYear - 1, defYear - 2},
+		Year: []string{strconv.Itoa(defYear - 1), strconv.Itoa(defYear - 2)},
 	}
 
 	if err = dl.Init(); err != nil {
+		log.Fatal(err)
+	}
+
+	if err = dl.Download(optSymbols); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -148,10 +158,26 @@ func (d *Downloader) Download(symbols []string) error {
 	}
 
 	for _, c := range codes {
-		DownDir := path.Join(d.Dir, c.Code+"."+c.Name)
+		DownDir := path.Join(d.Dir, c.Stock+"."+c.Name)
 
 		if _, err := os.Stat(DownDir); os.IsNotExist(err) {
 			if err = os.Mkdir(DownDir, os.ModePerm); err != nil {
+				return err
+			}
+		}
+
+		ann, err := d.query(c)
+		if err != nil {
+			return err
+		}
+
+		for _, a := range ann {
+			adjunctUrl := a["adjunctUrl"].(string)
+			title := a["announcementTitle"].(string)
+
+			urlFile := "http://static.cninfo.com.cn" + adjunctUrl
+
+			if err = d.downFile(urlFile, title); err != nil {
 				return err
 			}
 		}
@@ -161,17 +187,70 @@ func (d *Downloader) Download(symbols []string) error {
 }
 
 // lookUpCode return code and orgId
-func (d *Downloader) lookUpCode(contents []string) (ret []Code) {
+func (d *Downloader) lookUpCode(contents []string) (ret []code) {
 
 	// TODO: to optimize
 	for _, r := range d.list.StockList {
 		for _, c := range contents {
 			if c == r["code"] || c == r["pinyin"] || c == r["zwjc"] {
-				ret = append(ret, Code{
-					Code:  r["code"],
+				ret = append(ret, code{
+					Stock: r["code"],
 					OrgId: r["orgId"],
 					Name:  strings.Replace(r["zwjc"], "*", "", -1),
 				})
+			}
+		}
+	}
+
+	return
+}
+
+func (d *Downloader) query(c code) (rets []map[string]interface{}, err error) {
+
+	resp, err := http.PostForm("http://www.cninfo.com.cn/new/hisAnnouncement/query",
+		url.Values{
+			"pageNum":   []string{"1"},
+			"pageSize":  []string{"30"},
+			"column":    []string{""},
+			"tabName":   []string{"fulltext"},
+			"plate":     []string{""},
+			"stock":     []string{""},
+			"searchkey": []string{""},
+			"secid":     []string{""},
+			"category":  []string{"category_ndbg_szsh"},
+			"trade":     []string{""},
+			"seDate":    []string{""},
+			"sortName":  []string{""},
+			"sortType":  []string{""},
+			"isHLtitle": []string{"true"},
+		})
+
+	if err != nil {
+		return
+	}
+
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+
+	result := make(map[string]interface{}, 1)
+
+	if err = json.Unmarshal(body, &result); err != nil {
+		return
+	}
+
+	// filter
+	for _, ann := range result["announcements"].([]interface{}) {
+		title := ann.(map[string]interface{})["announcementTitle"].(string)
+
+		for _, y := range d.Year {
+
+			if strings.Contains(title, y) {
+				rets = append(rets, ann.(map[string]interface{}))
+				continue
 			}
 		}
 	}
