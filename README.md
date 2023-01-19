@@ -28,4 +28,4 @@ See \`./ann-downloader --help\` for more.
 
 ## Known Issues
 
-- [cninfo](https://www.cninfo.com.cn) has some anti-crawler mechanism, so a common error is http connection error. This is usually solved by running it again after an interval of 1 minute.
+- [cninfo](https://www.cninfo.com.cn) has some anti-crawler mechanisms, so a common error is http connection error. This is usually solved by running it again after an interval of 1 minute.
