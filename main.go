@@ -86,7 +86,7 @@ func main() {
 	flag.Parse()
 
 	if *optVer {
-		fmt.Printf("%s %s", APP_NAME, VERSION)
+		fmt.Printf("%s %s\n", APP_NAME, VERSION)
 		os.Exit(0)
 	}
 
@@ -104,6 +104,7 @@ func main() {
 		Dir:               defDir,
 		Year:              []string{strconv.Itoa(defYear - 1), strconv.Itoa(defYear - 2)},
 		FilterOutKeyWords: []string{"摘要"},
+		SkipIfExists:      true,
 	}
 
 	if err = dl.Init(); err != nil {
@@ -214,75 +215,92 @@ func (d *Downloader) lookUpCode(contents []string) (ret []code) {
 	return
 }
 
-func (d *Downloader) query(c code) (rets []map[string]interface{}, err error) {
+func (d *Downloader) query(c code) ([]map[string]interface{}, error) {
 
-	// FIXME: page
-	resp, err := http.PostForm("http://www.cninfo.com.cn/new/hisAnnouncement/query",
-		url.Values{
-			"pageNum":   []string{"1"},
-			"pageSize":  []string{"30"},
-			"column":    []string{""},
-			"tabName":   []string{"fulltext"},
-			"plate":     []string{""},
-			"stock":     []string{c.Stock + "," + c.OrgId},
-			"searchkey": []string{""},
-			"secid":     []string{""},
-			"category":  []string{"category_ndbg_szsh"},
-			"trade":     []string{""},
-			"seDate":    []string{""},
-			"sortName":  []string{""},
-			"sortType":  []string{""},
-			"isHLtitle": []string{"true"},
-		})
+	var rets []map[string]interface{}
+	page := 1
 
-	if err != nil {
-		return
-	}
+	for {
+		resp, err := http.PostForm("http://www.cninfo.com.cn/new/hisAnnouncement/query",
+			url.Values{
+				"pageNum":   []string{strconv.Itoa(page)},
+				"pageSize":  []string{"30"},
+				"column":    []string{""},
+				"tabName":   []string{"fulltext"},
+				"plate":     []string{""},
+				"stock":     []string{c.Stock + "," + c.OrgId},
+				"searchkey": []string{""},
+				"secid":     []string{""},
+				"category":  []string{"category_ndbg_szsh"},
+				"trade":     []string{""},
+				"seDate":    []string{""},
+				"sortName":  []string{""},
+				"sortType":  []string{""},
+				"isHLtitle": []string{"true"},
+			})
 
-	defer resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return
-	}
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
 
-	result := make(map[string]interface{}, 1)
+		resp.Body.Close()
 
-	if err = json.Unmarshal(body, &result); err != nil {
-		return
-	}
+		result := make(map[string]interface{}, 1)
 
-	// filter
-LABELANNOUNCE:
-	for _, ann := range result["announcements"].([]interface{}) {
-		title := ann.(map[string]interface{})["announcementTitle"].(string)
+		if err = json.Unmarshal(body, &result); err != nil {
+			return nil, err
+		}
 
-		valid := false
-		for _, y := range d.Year {
-			if strings.Contains(title, y) {
-				valid = true
-				break
+		// filter
+	LABELANNOUNCE:
+		for _, ann := range result["announcements"].([]interface{}) {
+			title := ann.(map[string]interface{})["announcementTitle"].(string)
+
+			valid := false
+			for _, y := range d.Year {
+				if strings.Contains(title, y) {
+					valid = true
+					break
+				}
 			}
-		}
 
-		if !valid {
-			continue LABELANNOUNCE
-		}
-
-		for _, no := range d.FilterOutKeyWords {
-			if strings.Contains(title, no) {
+			if !valid {
 				continue LABELANNOUNCE
 			}
+
+			for _, no := range d.FilterOutKeyWords {
+				if strings.Contains(title, no) {
+					continue LABELANNOUNCE
+				}
+			}
+
+			rets = append(rets, ann.(map[string]interface{}))
 		}
 
-		rets = append(rets, ann.(map[string]interface{}))
+		if !result["hasMore"].(bool) {
+			break
+		}
+
+		page++
 	}
 
-	return
+	return rets, nil
 }
 
 // https://golangdocs.com/golang-download-files
-func (d *Downloader) downFile(url string, fullname string) error {
+func (d *Downloader) downFile(urlFile string, fullname string) error {
+
+	if d.SkipIfExists {
+		if _, err := os.Stat(fullname); !os.IsNotExist(err) {
+			log.Printf("%s already exists, skip downloading", fullname)
+			return nil
+		}
+	}
 
 	// Create blank file
 	file, err := os.Create(fullname)
@@ -300,7 +318,7 @@ func (d *Downloader) downFile(url string, fullname string) error {
 	}
 
 	// Put content on file
-	resp, err := client.Get(url)
+	resp, err := client.Get(urlFile)
 	if err != nil {
 		return err
 	}
