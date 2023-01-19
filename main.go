@@ -32,7 +32,7 @@ type Downloader struct {
 	// Years to lookup, e.g 20xx
 	Year []string
 
-	// TODO
+	// SkipIfExists
 	SkipIfExists bool
 
 	// FilterOutKeyWords
