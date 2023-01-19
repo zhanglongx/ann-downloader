@@ -82,6 +82,7 @@ func main() {
 
 	optVer := flag.Bool("version", false, "print version")
 	optDir := flag.String("dir", defDir, "download directory prefix")
+	optNoSkip := flag.Bool("no-skip", false, "no skip if exists")
 
 	flag.Parse()
 
@@ -104,7 +105,7 @@ func main() {
 		Dir:               defDir,
 		Year:              []string{strconv.Itoa(defYear - 1), strconv.Itoa(defYear - 2)},
 		FilterOutKeyWords: []string{"摘要"},
-		SkipIfExists:      true,
+		SkipIfExists:      !*optNoSkip,
 	}
 
 	if err = dl.Init(); err != nil {
