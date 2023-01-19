@@ -35,6 +35,9 @@ type Downloader struct {
 	// TODO
 	SkipIfExists bool
 
+	// FilterOutKeyWords
+	FilterOutKeyWords []string
+
 	list struct {
 		StockList []map[string]string
 	}
@@ -71,10 +74,14 @@ func main() {
 		}
 	}
 
-	defYear, _, _ := time.Now().Date()
+	// FIXME: more precise? and make as an opt
+	defYear, month, _ := time.Now().Date()
+	if month <= 8 {
+		defYear -= 1
+	}
 
 	optVer := flag.Bool("version", false, "print version")
-	optDir := flag.String("dir", defDir, "download directory")
+	optDir := flag.String("dir", defDir, "download directory prefix")
 
 	flag.Parse()
 
@@ -94,8 +101,9 @@ func main() {
 	}
 
 	dl := Downloader{
-		Dir:  defDir,
-		Year: []string{strconv.Itoa(defYear - 1), strconv.Itoa(defYear - 2)},
+		Dir:               defDir,
+		Year:              []string{strconv.Itoa(defYear - 1), strconv.Itoa(defYear - 2)},
+		FilterOutKeyWords: []string{"摘要"},
 	}
 
 	if err = dl.Init(); err != nil {
@@ -175,9 +183,10 @@ func (d *Downloader) Download(symbols []string) error {
 			adjunctUrl := a["adjunctUrl"].(string)
 			title := a["announcementTitle"].(string)
 
-			urlFile := "http://static.cninfo.com.cn" + adjunctUrl
+			urlFile := "http://static.cninfo.com.cn/" + adjunctUrl
+			pathFile := path.Join(DownDir, title+".pdf")
 
-			if err = d.downFile(urlFile, title); err != nil {
+			if err = d.downFile(urlFile, pathFile); err != nil {
 				return err
 			}
 		}
@@ -207,6 +216,7 @@ func (d *Downloader) lookUpCode(contents []string) (ret []code) {
 
 func (d *Downloader) query(c code) (rets []map[string]interface{}, err error) {
 
+	// FIXME: page
 	resp, err := http.PostForm("http://www.cninfo.com.cn/new/hisAnnouncement/query",
 		url.Values{
 			"pageNum":   []string{"1"},
@@ -214,7 +224,7 @@ func (d *Downloader) query(c code) (rets []map[string]interface{}, err error) {
 			"column":    []string{""},
 			"tabName":   []string{"fulltext"},
 			"plate":     []string{""},
-			"stock":     []string{""},
+			"stock":     []string{c.Stock + "," + c.OrgId},
 			"searchkey": []string{""},
 			"secid":     []string{""},
 			"category":  []string{"category_ndbg_szsh"},
@@ -243,16 +253,29 @@ func (d *Downloader) query(c code) (rets []map[string]interface{}, err error) {
 	}
 
 	// filter
+LABELANNOUNCE:
 	for _, ann := range result["announcements"].([]interface{}) {
 		title := ann.(map[string]interface{})["announcementTitle"].(string)
 
+		valid := false
 		for _, y := range d.Year {
-
 			if strings.Contains(title, y) {
-				rets = append(rets, ann.(map[string]interface{}))
-				continue
+				valid = true
+				break
 			}
 		}
+
+		if !valid {
+			continue LABELANNOUNCE
+		}
+
+		for _, no := range d.FilterOutKeyWords {
+			if strings.Contains(title, no) {
+				continue LABELANNOUNCE
+			}
+		}
+
+		rets = append(rets, ann.(map[string]interface{}))
 	}
 
 	return
