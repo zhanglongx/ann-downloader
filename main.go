@@ -76,7 +76,7 @@ func main() {
 
 	// FIXME: more precise? and make as an opt
 	defYear, month, _ := time.Now().Date()
-	if month <= 8 {
+	if month <= 4 {
 		defYear -= 1
 	}
 
