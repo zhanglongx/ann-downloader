@@ -19,7 +19,7 @@ import (
 
 const (
 	APP_NAME = "ann-downloader"
-	VERSION  = "0.9.0"
+	VERSION  = "1.0.0"
 )
 
 // Downloader first get all stocks info,
