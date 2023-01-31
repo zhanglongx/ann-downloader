@@ -12,14 +12,20 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
 	APP_NAME = "ann-downloader"
-	VERSION  = "1.0.0"
+	VERSION  = "1.0.2"
+)
+
+const (
+	// YEARSTBACKWARDS is the years to backwards if not specified
+	YEARSTBACKWARDS = 3
 )
 
 // Downloader first get all stocks info,
@@ -50,6 +56,8 @@ type code struct {
 	Name string
 }
 
+type announcements []map[string]interface{}
+
 func main() {
 
 	defDir, err := defaultDir()
@@ -74,15 +82,10 @@ func main() {
 		}
 	}
 
-	// FIXME: more precise? and make as an opt
-	defYear, month, _ := time.Now().Date()
-	if month <= 4 {
-		defYear -= 1
-	}
-
 	optVer := flag.Bool("version", false, "print version")
 	optDir := flag.String("dir", defDir, "download directory prefix")
 	optNoSkip := flag.Bool("no-skip", false, "no skip if exists")
+	optYear := flag.String("year", "", "year to download")
 
 	flag.Parse()
 
@@ -101,9 +104,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	var years []string
+	if *optYear != "" {
+		years = make([]string, 1)
+		years[0] = *optYear
+	}
+
 	dl := Downloader{
 		Dir:               defDir,
-		Year:              []string{strconv.Itoa(defYear - 1), strconv.Itoa(defYear - 2)},
+		Year:              years,
 		FilterOutKeyWords: []string{"摘要"},
 		SkipIfExists:      !*optNoSkip,
 	}
@@ -176,12 +185,14 @@ func (d *Downloader) Download(symbols []string) error {
 			}
 		}
 
-		ann, err := d.query(c)
+		anns, err := d.query(c)
 		if err != nil {
 			return err
 		}
 
-		for _, a := range ann {
+		anns = anns.filterOutKeyWords(d.FilterOutKeyWords).filterYears(d.Year)
+
+		for _, a := range anns {
 			adjunctUrl := a["adjunctUrl"].(string)
 			title := a["announcementTitle"].(string)
 
@@ -216,9 +227,9 @@ func (d *Downloader) lookUpCode(contents []string) (ret []code) {
 	return
 }
 
-func (d *Downloader) query(c code) ([]map[string]interface{}, error) {
+func (d *Downloader) query(c code) (announcements, error) {
 
-	var rets []map[string]interface{}
+	var rets announcements
 	page := 1
 
 	for {
@@ -257,29 +268,7 @@ func (d *Downloader) query(c code) ([]map[string]interface{}, error) {
 			return nil, err
 		}
 
-		// filter
-	LABELANNOUNCE:
 		for _, ann := range result["announcements"].([]interface{}) {
-			title := ann.(map[string]interface{})["announcementTitle"].(string)
-
-			valid := false
-			for _, y := range d.Year {
-				if strings.Contains(title, y) {
-					valid = true
-					break
-				}
-			}
-
-			if !valid {
-				continue LABELANNOUNCE
-			}
-
-			for _, no := range d.FilterOutKeyWords {
-				if strings.Contains(title, no) {
-					continue LABELANNOUNCE
-				}
-			}
-
 			rets = append(rets, ann.(map[string]interface{}))
 		}
 
@@ -329,4 +318,66 @@ func (d *Downloader) downFile(urlFile string, fullname string) error {
 	_, err = io.Copy(file, resp.Body)
 
 	return err
+}
+
+func (a announcements) filterOutKeyWords(keyWords []string) (rets announcements) {
+
+LABELKEYWORDSLOOP:
+	for _, ann := range a {
+		title := ann["announcementTitle"].(string)
+
+		for _, no := range keyWords {
+			if strings.Contains(title, no) {
+				continue LABELKEYWORDSLOOP
+			}
+		}
+
+		rets = append(rets, ann)
+	}
+
+	return
+}
+
+func (a announcements) filterYears(years []string) (rets announcements) {
+
+	toSort := make(map[string]announcements, 0)
+	reg := regexp.MustCompile(`20\d\d`)
+
+	for _, ann := range a {
+		title := ann["announcementTitle"].(string)
+
+		// FIXME: the most tricky one is (20xx amend), so simply
+		// find by leftmost for now
+		year := reg.FindString(title)
+		if year == "" {
+			continue
+		}
+
+		toSort[year] = append(toSort[year], ann)
+	}
+
+	if years == nil {
+		keys := make([]string, 0, len(toSort))
+
+		for k := range toSort {
+			keys = append(keys, k)
+		}
+
+		sort.Strings(keys)
+
+		for i := 0; i < YEARSTBACKWARDS && i < len(keys); i++ {
+			years = append(years, keys[len(keys)-1-i])
+		}
+	}
+
+	for _, y := range years {
+		if toSort[y] == nil {
+			log.Printf("%s announcement cannot be found", y)
+			continue
+		}
+
+		rets = append(rets, toSort[y]...)
+	}
+
+	return
 }
