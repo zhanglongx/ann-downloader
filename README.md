@@ -22,9 +22,9 @@ Generally, ann-downloader will download announcements from [cninfo](https://www.
 
 - \<SYMBOL\> supports stock, name, pinyin. If there are duplicates, all items will be downloaded.
 
-- Only supports download year announcements now. Announcements of the last two years will be downloaded. Here is the definition of the last two years: if the month of the current time is April and before, then the last two years are counted from the 3 years ago, otherwise from the previous year.
+- Only supports download year announcements now. If \`-year\` not specified, announcements of the last three years will be downloaded when exists. 
 
-See \`./ann-downloader --help\` for more.
+See './ann-downloader --help' for more.
 
 ## Known Issues
 
