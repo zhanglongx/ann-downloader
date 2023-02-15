@@ -20,7 +20,7 @@ import (
 
 const (
 	APP_NAME = "ann-downloader"
-	VERSION  = "1.0.2"
+	VERSION  = "1.0.3"
 )
 
 const (
@@ -35,18 +35,42 @@ type Downloader struct {
 	// Dir prefix to download
 	Dir string
 
-	// Years to lookup, e.g 20xx
-	Year []string
+	// Category is one of:
+	// category_ndbg_szsh
+	// category_sf_szsh
+	Category string
 
 	// SkipIfExists
 	SkipIfExists bool
 
-	// FilterOutKeyWords
-	FilterOutKeyWords []string
+	// MatchKeyWords test if title match,
+	// nil will lead this test passed,
+	// BUT empty will lead to none of match.
+	// MatchKeyWords priors to NotMatchKeyWords
+	MatchKeyWords []string
+
+	// NotMatchKeyWords test if title not match,
+	// nil or empty will lead this test passed.
+	// MatchKeyWords priors to NotMatchKeyWords
+	NotMatchKeyWords []string
+
+	FilterFunc func(announcements) announcements
 
 	list struct {
 		StockList []map[string]string
 	}
+}
+
+type Cfg struct {
+	// Dir prefix to download
+	Dir string
+
+	// Category:
+	// ndbg, sf
+	CategoryType string
+
+	// SkipIfExists
+	SkipIfExists bool
 }
 
 type code struct {
@@ -60,6 +84,43 @@ type announcements []map[string]interface{}
 
 func main() {
 
+	cfg := newDefaultCfg()
+
+	optVer := flag.Bool("version", false, "print version")
+	flag.StringVar(&cfg.Dir, "dir", cfg.Dir, "download directory prefix")
+	optNoSkip := flag.Bool("no-skip", !cfg.SkipIfExists, "no skip if exists")
+	flag.StringVar(&cfg.CategoryType, "type", cfg.CategoryType, `"ndbg", "sf"`)
+
+	flag.Parse()
+
+	if *optVer {
+		fmt.Printf("%s %s\n", APP_NAME, VERSION)
+		os.Exit(0)
+	}
+
+	cfg.SkipIfExists = !*optNoSkip
+
+	optSymbols := flag.Args()
+	if len(optSymbols) == 0 {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	dl, err := NewDownloader(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err = dl.Init(); err != nil {
+		log.Fatal(err)
+	}
+
+	if err = dl.Download(optSymbols); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func newDefaultCfg() (c *Cfg) {
 	defDir, err := defaultDir()
 	if err != nil {
 		log.Printf("HOME not exist, using current directory as default")
@@ -82,47 +143,10 @@ func main() {
 		}
 	}
 
-	optVer := flag.Bool("version", false, "print version")
-	optDir := flag.String("dir", defDir, "download directory prefix")
-	optNoSkip := flag.Bool("no-skip", false, "no skip if exists")
-	optYear := flag.String("year", "", "year to download")
-
-	flag.Parse()
-
-	if *optVer {
-		fmt.Printf("%s %s\n", APP_NAME, VERSION)
-		os.Exit(0)
-	}
-
-	if _, err = os.Stat(*optDir); os.IsNotExist(err) {
-		log.Fatalf("%s not exists", *optDir)
-	}
-
-	optSymbols := flag.Args()
-	if len(optSymbols) == 0 {
-		flag.PrintDefaults()
-		os.Exit(1)
-	}
-
-	var years []string
-	if *optYear != "" {
-		years = make([]string, 1)
-		years[0] = *optYear
-	}
-
-	dl := Downloader{
-		Dir:               defDir,
-		Year:              years,
-		FilterOutKeyWords: []string{"摘要"},
-		SkipIfExists:      !*optNoSkip,
-	}
-
-	if err = dl.Init(); err != nil {
-		log.Fatal(err)
-	}
-
-	if err = dl.Download(optSymbols); err != nil {
-		log.Fatal(err)
+	return &Cfg{
+		Dir:          defDir,
+		CategoryType: "ndbg",
+		SkipIfExists: true,
 	}
 }
 
@@ -142,6 +166,35 @@ func isDirectory(path string) (bool, error) {
 	}
 
 	return fileInfo.IsDir(), err
+}
+
+func NewDownloader(c *Cfg) (*Downloader, error) {
+	if _, err := os.Stat(c.Dir); os.IsNotExist(err) {
+		return nil, err
+	}
+
+	switch c.CategoryType {
+	// FIXME: open MatchKeyWords/NotMatchKeyWords
+	case "ndbg":
+		return &Downloader{
+			Dir:              c.Dir,
+			Category:         "category_ndbg_szsh",
+			SkipIfExists:     c.SkipIfExists,
+			MatchKeyWords:    nil,
+			NotMatchKeyWords: []string{"摘要"},
+			FilterFunc:       LastNYears,
+		}, nil
+	case "sf":
+		return &Downloader{
+			Dir:              c.Dir,
+			Category:         "category_sf_szsh",
+			SkipIfExists:     c.SkipIfExists,
+			MatchKeyWords:    []string{"招股说明"},
+			NotMatchKeyWords: nil,
+		}, nil
+	default:
+		return nil, errors.New("type not supported")
+	}
 }
 
 func (d *Downloader) Init() error {
@@ -179,6 +232,7 @@ func (d *Downloader) Download(symbols []string) error {
 	for _, c := range codes {
 		DownDir := path.Join(d.Dir, c.Stock+"."+c.Name)
 
+		// mkdir target directory if not exist
 		if _, err := os.Stat(DownDir); os.IsNotExist(err) {
 			if err = os.Mkdir(DownDir, os.ModePerm); err != nil {
 				return err
@@ -190,7 +244,14 @@ func (d *Downloader) Download(symbols []string) error {
 			return err
 		}
 
-		anns = anns.filterOutKeyWords(d.FilterOutKeyWords).filterYears(d.Year)
+		anns = anns.filterMatchKeyWords(d.MatchKeyWords).
+			filterNotMatchKeyWords(d.NotMatchKeyWords)
+
+		if d.FilterFunc != nil {
+			anns = d.FilterFunc(anns)
+		}
+
+		// FIXME: check anns is empty?
 
 		for _, a := range anns {
 			adjunctUrl := a["adjunctUrl"].(string)
@@ -243,7 +304,7 @@ func (d *Downloader) query(c code) (announcements, error) {
 				"stock":     []string{c.Stock + "," + c.OrgId},
 				"searchkey": []string{""},
 				"secid":     []string{""},
-				"category":  []string{"category_ndbg_szsh"},
+				"category":  []string{d.Category},
 				"trade":     []string{""},
 				"seDate":    []string{""},
 				"sortName":  []string{""},
@@ -268,8 +329,10 @@ func (d *Downloader) query(c code) (announcements, error) {
 			return nil, err
 		}
 
-		for _, ann := range result["announcements"].([]interface{}) {
-			rets = append(rets, ann.(map[string]interface{}))
+		if result["announcements"] != nil {
+			for _, ann := range result["announcements"].([]interface{}) {
+				rets = append(rets, ann.(map[string]interface{}))
+			}
 		}
 
 		if !result["hasMore"].(bool) {
@@ -320,8 +383,27 @@ func (d *Downloader) downFile(urlFile string, fullname string) error {
 	return err
 }
 
-func (a announcements) filterOutKeyWords(keyWords []string) (rets announcements) {
+func (a announcements) filterMatchKeyWords(keyWords []string) (rets announcements) {
+	if keyWords == nil {
+		rets = a
+		return
+	}
 
+	for _, ann := range a {
+		title := ann["announcementTitle"].(string)
+
+		for _, no := range keyWords {
+			if strings.Contains(title, no) {
+				rets = append(rets, ann)
+				break
+			}
+		}
+	}
+
+	return
+}
+
+func (a announcements) filterNotMatchKeyWords(keyWords []string) (rets announcements) {
 LABELKEYWORDSLOOP:
 	for _, ann := range a {
 		title := ann["announcementTitle"].(string)
@@ -338,16 +420,15 @@ LABELKEYWORDSLOOP:
 	return
 }
 
-func (a announcements) filterYears(years []string) (rets announcements) {
-
+func LastNYears(a announcements) (rets announcements) {
 	toSort := make(map[string]announcements, 0)
 	reg := regexp.MustCompile(`20\d\d`)
 
 	for _, ann := range a {
 		title := ann["announcementTitle"].(string)
 
-		// FIXME: the most tricky one is (20xx amend), so simply
-		// find by leftmost for now
+		// FIXME: the most common and tricky one is (20xx amend),
+		// so simply find by leftmost for now
 		year := reg.FindString(title)
 		if year == "" {
 			continue
@@ -356,26 +437,20 @@ func (a announcements) filterYears(years []string) (rets announcements) {
 		toSort[year] = append(toSort[year], ann)
 	}
 
-	if years == nil {
-		keys := make([]string, 0, len(toSort))
+	var keys []string
 
-		for k := range toSort {
-			keys = append(keys, k)
-		}
+	for k := range toSort {
+		keys = append(keys, k)
+	}
 
-		sort.Strings(keys)
+	sort.Strings(keys)
 
-		for i := 0; i < YEARSTBACKWARDS && i < len(keys); i++ {
-			years = append(years, keys[len(keys)-1-i])
-		}
+	var years []string
+	for i := 0; i < YEARSTBACKWARDS && i < len(keys); i++ {
+		years = append(years, keys[len(keys)-1-i])
 	}
 
 	for _, y := range years {
-		if toSort[y] == nil {
-			log.Printf("%s announcement cannot be found", y)
-			continue
-		}
-
 		rets = append(rets, toSort[y]...)
 	}
 
