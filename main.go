@@ -298,7 +298,7 @@ func (d *Downloader) query(c code) (announcements, error) {
 			url.Values{
 				"pageNum":   []string{strconv.Itoa(page)},
 				"pageSize":  []string{"30"},
-				"column":    []string{""},
+				"column":    []string{"sse"},
 				"tabName":   []string{"fulltext"},
 				"plate":     []string{""},
 				"stock":     []string{c.Stock + "," + c.OrgId},
