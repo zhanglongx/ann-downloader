@@ -1,6 +1,6 @@
 # ann-downloader
 
-This is a chinese stock market annual report downloader.
+This is a chinese stock market reports(annual, sf) downloader.
 
 ## Build
 
@@ -22,7 +22,7 @@ Generally, ann-downloader will download announcements from [cninfo](https://www.
 
 - \<SYMBOL\> supports stock, name, pinyin. If there are duplicates, all items will be downloaded.
 
-- Only supports download year announcements now. If \`-year\` not specified, announcements of the last three years will be downloaded when exists. 
+- Only supports download year announcements and 'sf' report now. If it is annual, announcements of the last three years will be downloaded when exists. 
 
 See './ann-downloader --help' for more.
 
