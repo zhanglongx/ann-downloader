@@ -20,7 +20,7 @@ import (
 
 const (
 	APP_NAME = "ann-downloader"
-	VERSION  = "1.0.3"
+	VERSION  = "1.0.4"
 )
 
 const (
@@ -71,6 +71,9 @@ type Cfg struct {
 
 	// SkipIfExists
 	SkipIfExists bool
+
+	// LastYears
+	LastYears int
 }
 
 type code struct {
@@ -88,8 +91,9 @@ func main() {
 
 	optVer := flag.Bool("version", false, "print version")
 	flag.StringVar(&cfg.Dir, "dir", cfg.Dir, "download directory prefix")
-	optNoSkip := flag.Bool("no-skip", !cfg.SkipIfExists, "no skip if exists")
 	flag.StringVar(&cfg.CategoryType, "type", cfg.CategoryType, `"ndbg", "sf"`)
+	optNoSkip := flag.Bool("no-skip", !cfg.SkipIfExists, "no skip if exists")
+	optLastYears := flag.Int("last-years", cfg.LastYears, "last years to download (ndbg only)")
 
 	flag.Parse()
 
@@ -99,6 +103,7 @@ func main() {
 	}
 
 	cfg.SkipIfExists = !*optNoSkip
+	cfg.LastYears = *optLastYears
 
 	optSymbols := flag.Args()
 	if len(optSymbols) == 0 {
@@ -147,6 +152,7 @@ func newDefaultCfg() (c *Cfg) {
 		Dir:          defDir,
 		CategoryType: "ndbg",
 		SkipIfExists: true,
+		LastYears:    YEARSTBACKWARDS,
 	}
 }
 
@@ -182,7 +188,7 @@ func NewDownloader(c *Cfg) (*Downloader, error) {
 			SkipIfExists:     c.SkipIfExists,
 			MatchKeyWords:    nil,
 			NotMatchKeyWords: []string{"摘要"},
-			FilterFunc:       LastNYears,
+			FilterFunc:       LastNYearsHelper(c.LastYears),
 		}, nil
 	case "sf":
 		return &Downloader{
@@ -420,39 +426,41 @@ LABELKEYWORDSLOOP:
 	return
 }
 
-func LastNYears(a announcements) (rets announcements) {
-	toSort := make(map[string]announcements, 0)
-	reg := regexp.MustCompile(`20\d\d`)
+func LastNYearsHelper(lastYears int) func(announcements) announcements {
+	return func(a announcements) (rets announcements) {
+		toSort := make(map[string]announcements, 0)
+		reg := regexp.MustCompile(`20\d\d`)
 
-	for _, ann := range a {
-		title := ann["announcementTitle"].(string)
+		for _, ann := range a {
+			title := ann["announcementTitle"].(string)
 
-		// FIXME: the most common and tricky one is (20xx amend),
-		// so simply find by leftmost for now
-		year := reg.FindString(title)
-		if year == "" {
-			continue
+			// FIXME: the most common and tricky one is (20xx amend),
+			// so simply find by leftmost for now
+			year := reg.FindString(title)
+			if year == "" {
+				continue
+			}
+
+			toSort[year] = append(toSort[year], ann)
 		}
 
-		toSort[year] = append(toSort[year], ann)
+		var keys []string
+
+		for k := range toSort {
+			keys = append(keys, k)
+		}
+
+		sort.Strings(keys)
+
+		var years []string
+		for i := 0; i < lastYears && i < len(keys); i++ {
+			years = append(years, keys[len(keys)-1-i])
+		}
+
+		for _, y := range years {
+			rets = append(rets, toSort[y]...)
+		}
+
+		return
 	}
-
-	var keys []string
-
-	for k := range toSort {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	var years []string
-	for i := 0; i < YEARSTBACKWARDS && i < len(keys); i++ {
-		years = append(years, keys[len(keys)-1-i])
-	}
-
-	for _, y := range years {
-		rets = append(rets, toSort[y]...)
-	}
-
-	return
 }
