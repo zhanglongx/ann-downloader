@@ -21,6 +21,8 @@ import (
 const (
 	APP_NAME = "ann-downloader"
 	VERSION  = "1.0.4"
+
+	USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
 )
 
 const (
@@ -205,7 +207,15 @@ func NewDownloader(c *Cfg) (*Downloader, error) {
 
 func (d *Downloader) Init() error {
 
-	resp, err := http.Get("http://www.cninfo.com.cn/new/data/szse_stock.json")
+	req, err := http.NewRequest("GET", "http://www.cninfo.com.cn/new/data/szse_stock.json", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", USER_AGENT)
+
+	// Send the HTTP request
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -300,23 +310,34 @@ func (d *Downloader) query(c code) (announcements, error) {
 	page := 1
 
 	for {
-		resp, err := http.PostForm("http://www.cninfo.com.cn/new/hisAnnouncement/query",
-			url.Values{
-				"pageNum":   []string{strconv.Itoa(page)},
-				"pageSize":  []string{"30"},
-				"column":    []string{"sse"},
-				"tabName":   []string{"fulltext"},
-				"plate":     []string{""},
-				"stock":     []string{c.Stock + "," + c.OrgId},
-				"searchkey": []string{""},
-				"secid":     []string{""},
-				"category":  []string{d.Category},
-				"trade":     []string{""},
-				"seDate":    []string{""},
-				"sortName":  []string{""},
-				"sortType":  []string{""},
-				"isHLtitle": []string{"true"},
-			})
+		// Create a new POST request with form data
+		formData := url.Values{
+			"pageNum":   []string{strconv.Itoa(page)},
+			"pageSize":  []string{"30"},
+			"column":    []string{"sse"},
+			"tabName":   []string{"fulltext"},
+			"plate":     []string{""},
+			"stock":     []string{c.Stock + "," + c.OrgId},
+			"searchkey": []string{""},
+			"secid":     []string{""},
+			"category":  []string{d.Category},
+			"trade":     []string{""},
+			"seDate":    []string{""},
+			"sortName":  []string{""},
+			"sortType":  []string{""},
+			"isHLtitle": []string{"true"},
+		}
+		req, err := http.NewRequest("POST", "http://www.cninfo.com.cn/new/hisAnnouncement/query",
+			strings.NewReader(formData.Encode()))
+		if err != nil {
+			return nil, err
+		}
+		// Set the correct headers, including USER_AGENT and form content type
+		req.Header.Set("User-Agent", USER_AGENT)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
 
 		if err != nil {
 			return nil, err
