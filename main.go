@@ -213,7 +213,6 @@ func (d *Downloader) Init() error {
 	}
 	req.Header.Set("User-Agent", USER_AGENT)
 
-	// Send the HTTP request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -310,7 +309,6 @@ func (d *Downloader) query(c code) (announcements, error) {
 	page := 1
 
 	for {
-		// Create a new POST request with form data
 		formData := url.Values{
 			"pageNum":   []string{strconv.Itoa(page)},
 			"pageSize":  []string{"30"},
@@ -332,7 +330,7 @@ func (d *Downloader) query(c code) (announcements, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Set the correct headers, including USER_AGENT and form content type
+
 		req.Header.Set("User-Agent", USER_AGENT)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
